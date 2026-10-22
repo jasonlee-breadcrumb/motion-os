@@ -336,7 +336,7 @@ const TIPS = {
 
 /* ================= state ================= */
 const $ = s => document.querySelector(s);
-const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
 const ease = p => 1 - Math.pow(1 - clamp(p), 3);
 const fmt = t => { const m = Math.floor(t / 60), s = t - m * 60; return `${String(m).padStart(2,'0')}:${s.toFixed(1).padStart(4,'0')}`; };
@@ -624,7 +624,7 @@ function fieldHTML(e, k, p){
   else if (p.type === 'number') body = `<input type="number" data-path="${path}" data-num value="${esc(v)}" ${p.min != null ? `min="${p.min}"` : ''} ${p.max != null ? `max="${p.max}"` : ''}>`;
   else if (p.type === 'choice') body = `<div class="seg" style="justify-self:start">${p.options.map(o => `<button data-choice="${path}" data-val="${esc(o)}" class="${o === v ? 'on' : ''}">${esc(o)}</button>`).join('')}</div>`;
   else if (p.type === 'motion') return `<div class="f ${ch ? 'changed' : ''}">${head(` <span class="claude">Claude</span><button class="info" data-tip-id="motion">i</button>`)}<textarea data-path="${path}" rows="2">${esc(v)}</textarea></div>`;
-  else if (p.type === 'color') body = `<div class="colorf">${P.brand.colors.map(c => `<button class="sw ${v === 'brand.' + c.id ? 'on' : ''}" style="background:${brandColor(c.id)}" data-color="${path}" data-val="brand.${c.id}" data-tip="${esc(c.name)}"></button>`).join('')}</div>`;
+  else if (p.type === 'color') body = `<div class="colorf">${P.brand.colors.map(c => `<button class="sw ${v === 'brand.' + c.id ? 'on' : ''}" style="background:${esc(brandColor(c.id))}" data-color="${path}" data-val="brand.${c.id}" data-tip="${esc(c.name)}"></button>`).join('')}</div>`;
   else if (p.type === 'media') body = `<div class="media"><div class="th" style="${thumbStyle(v)}">${thumbLabel(v)}</div><span class="nm">${esc(assetName(v))}</span><button class="btn sm" data-swap="${path}">Swap</button></div>`;
   else if (p.type === 'list') body = listHTML(path, p, v);
   return `<div class="f ${ch ? 'changed' : ''}">${head()}${body}</div>`;
@@ -651,7 +651,7 @@ function timingHTML(e){
   return `<div class="f ${ch ? 'changed' : ''}"><div class="fl">Timing<button class="info" data-tip-id="timing">i</button><span class="sp"></span><button class="undo" data-undo="${path}">Undo</button></div>
     <div class="row2"><input type="number" step="0.1" data-time="${e.id}" data-ix="0" value="${v[0]}" aria-label="In"><input type="number" step="0.1" data-time="${e.id}" data-ix="1" value="${v[1]}" aria-label="Out"></div></div>`;
 }
-const thumbStyle = id => { const s = assetSrc(id); return s ? `background-image:url('${s}')` : ''; };
+const thumbStyle = id => { const s = assetSrc(id); return s ? `background-image:url('${esc(encodeURI(s).replace(/'/g, '%27'))}')` : ''; };
 const thumbLabel = id => assetSrc(id) ? '' : 'None';
 
 function scriptPane(){
@@ -671,11 +671,11 @@ function stylePane(){
   return `<div class="pane">
     <div class="lbl">Colors <button class="info" data-tip-id="colors">i</button></div>
     <div class="brand">${P.brand.colors.map(c => { const path = 'brand.color.' + c.id, v = get(path, c.v);
-      return `<label class="bc ${path in st.over ? 'changed' : ''}"><input type="color" data-bcolor="${c.id}" value="${v}"><span><b>${esc(c.name)}</b><small>${v.toUpperCase()}</small></span></label>`; }).join('')}</div>
+      return `<label class="bc ${path in st.over ? 'changed' : ''}"><input type="color" data-bcolor="${esc(c.id)}" value="${esc(v)}"><span><b>${esc(c.name)}</b><small>${esc(v.toUpperCase())}</small></span></label>`; }).join('')}</div>
     <div class="lbl">Fonts <button class="info" data-tip-id="fonts">i</button></div>
     ${P.brand.fonts.map(f => { const path = 'brand.font.' + f.id, v = get(path, f.v);
       return `<div class="f ${path in st.over ? 'changed' : ''}"><div class="fl">${esc(f.name)}<span class="sp"></span><button class="undo" data-undo="${path}">Undo</button></div>
-        <select data-path="${path}" style="font-family:'${v}'">${[...new Set([v, ...FONTS])].map(o => `<option ${o === v ? 'selected' : ''} style="font-family:'${o}'">${esc(o)}</option>`).join('')}</select></div>`; }).join('')}
+        <select data-path="${path}" style="font-family:'${esc(v)}'">${[...new Set([v, ...FONTS])].map(o => `<option ${o === v ? 'selected' : ''} style="font-family:'${esc(o)}'">${esc(o)}</option>`).join('')}</select></div>`; }).join('')}
     <div class="lbl">Logo</div>
     ${(() => { const path = 'brand.logo', v = get(path, P.brand.logo);
       return `<div class="f ${path in st.over ? 'changed' : ''}"><div class="media"><div class="th" style="${thumbStyle(v)}">${thumbLabel(v)}</div><span class="nm">${v ? esc(assetName(v)) : 'No logo yet'}</span><button class="btn sm" data-swap="brand.logo">${v ? 'Swap' : 'Add'}</button><button class="undo" data-undo="${path}">Undo</button></div></div>`; })()}
@@ -854,6 +854,7 @@ const goScene = i => { const s = P.scenes[clamp(i, 0, P.scenes.length - 1)]; pau
 document.addEventListener('keydown', ev => {
   if (document.querySelector('.scrim')) { if (ev.key === 'Escape') document.querySelector('.scrim').remove(); return; }
   if (ev.target.closest('input,textarea,select')) return;
+  if (ev.metaKey || ev.ctrlKey || ev.altKey) return;  // leave browser shortcuts (Cmd+E, Ctrl+N, ...) alone
   const f = 1 / P.fps;
   if (ev.key === ' ') { ev.preventDefault(); playing() ? pause() : play(); }
   else if (ev.key === 'ArrowRight') { ev.preventDefault(); pause(); seek(now() + (ev.shiftKey ? 1 : f)); }
