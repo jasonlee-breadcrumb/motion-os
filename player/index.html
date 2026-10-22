@@ -390,6 +390,13 @@ function markDirty(){
   try { localStorage.setItem(KEY(), JSON.stringify(st)); } catch (e) {}
   $('#sendN').textContent = pendingEdits() + openNotes().length;
 }
+// Another tab of this project saved. Take its state, or this tab's next change would write its stale copy over it.
+window.addEventListener('storage', ev => {
+  if (!P || ev.key !== KEY() || !ev.newValue) return;
+  let next; try { next = JSON.parse(ev.newValue); } catch (e) { return; }
+  if (next.ver !== (P.version || 1)) return;  // that tab already has another version; this one reloads itself shortly
+  st = next; renderTabs(); renderPane(); renderTL(); renderHots(); $('#sendN').textContent = pendingEdits() + openNotes().length;
+});
 
 /* ================= playback ================= */
 function play(){ if (ui.mode === 'edit') setMode('preview'); vid.play(); syncMusic(true); closePop(); setPlayIcon(true); }
@@ -878,8 +885,13 @@ fetch('reel.json', {cache:'no-store'}).then(r => r.json()).then(async j => {
   wireVideo(); loadProject();
   $('#exportBtn').hidden = !P.export;
   if (hash.get('t')) vid.addEventListener('loadedmetadata', () => { seek(+hash.get('t')); if (hash.get('el') && elById(hash.get('el'))) selectEl(hash.get('el')); }, {once:true});
+  // Don't reload under a half-written note, an open dialog, a typed link or a drag: none of those are saved yet.
+  const busy = () => ui.pop || drag || document.querySelector('.scrim') || $('#linkIn')?.value.trim();
+  let waiting = null;
   setInterval(() => fetch('reel.json', {cache:'no-store'}).then(r => r.json()).then(n => {
-    if ((n.version || 1) !== (P.version || 1)) { toast(`v${n.version} is ready. Loading it.`); setTimeout(() => location.reload(), 900); }
+    if ((n.version || 1) === (P.version || 1)) return;
+    if (busy()) { if (waiting !== n.version) { waiting = n.version; toast(`v${n.version} is ready. It loads when you finish what you're doing.`); } return; }
+    toast(`v${n.version} is ready. Loading it.`); setTimeout(() => busy() || location.reload(), 900);  // else the next check retries
   }).catch(() => {}), 3000);
 }).catch(() => { $('#pane').innerHTML = '<div class="pane"><div class="empty">No reel.json next to this page.<br>Start Motion OS from Claude, or run: node player/serve.mjs your-project</div></div>'; });
 </script>
