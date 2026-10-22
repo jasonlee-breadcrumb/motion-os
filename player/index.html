@@ -352,12 +352,17 @@ const KEY = () => 'motionos:' + P.id;
 function loadProject(){
   const ver = P.version || 1;
   try { st = JSON.parse(localStorage.getItem(KEY()) || 'null'); } catch (e) { st = null; }
-  st = Object.assign({over:{}, notes:JSON.parse(JSON.stringify(P.notes || [])), status:{}, links:[], sent:[], sentSnap:{}, ver}, st || {});
+  st = Object.assign({over:{}, notes:JSON.parse(JSON.stringify(P.notes || [])), status:{}, links:[], sent:[], sentSnap:{}, sentBase:{}, ver}, st || {});
   if (st.ver !== ver) {
-    st.over = Object.fromEntries(Object.entries(st.over).filter(([k, v]) => JSON.stringify(st.sentSnap[k]) !== JSON.stringify(v)));
+    // Edits undone after sending were applied by Claude anyway, so they come back as an edit to the original value.
+    const undone = reverted().filter(k => k in st.sentBase && hasTarget(k) && JSON.stringify(st.sentBase[k]) !== JSON.stringify(baseOf(k))).map(k => [k, st.sentBase[k]]);
+    st.over = Object.fromEntries([...Object.entries(st.over).filter(([k, v]) => JSON.stringify(st.sentSnap[k]) !== JSON.stringify(v)), ...undone]);
     st.notes = st.notes.filter(n => !st.sent.includes(n.id)); st.links = st.links.filter(l => !l.sent);
-    st.sent = []; st.sentSnap = {}; st.ver = ver;
+    st.sent = []; st.sentSnap = {}; st.sentBase = {}; st.ver = ver;
   }
+  // Edits to an element, field or brand entry this version no longer has (Claude removed or renamed it) can't be shown or sent.
+  const gone = Object.keys(st.over).filter(k => !hasTarget(k));
+  if (gone.length) { gone.forEach(k => delete st.over[k]); toast(`${gone.length} unsent edit${gone.length === 1 ? ' was' : 's were'} dropped: ${gone.length === 1 ? 'that part is' : 'those parts are'} gone in v${ver}.`); }
   P.scenes.forEach(s => st.status[s.id] ??= 'review');
   ui = {...ui, scene:P.scenes[0].id, sel:null, pop:null, selNote:null};
   $('#projTitle').textContent = P.title; $('#projVer').textContent = 'v' + ver; document.title = P.title + ' · Motion OS';
@@ -383,7 +388,8 @@ const elEdited = e => Object.keys(st.over).some(k => k.startsWith(e.id + '.'));
 const sceneAt = t => P.scenes.find(s => t < s.t[1] - 1e-6) || P.scenes[P.scenes.length - 1];
 const now = () => vid.currentTime;
 const openNotes = () => st.notes.filter(n => !st.sent.includes(n.id));
-const pendingEdits = () => Object.entries(st.over).filter(([k, v]) => JSON.stringify(st.sentSnap[k]) !== JSON.stringify(v)).length + st.links.filter(l => !l.sent).length;
+const reverted = () => Object.keys(st.sentSnap).filter(k => !(k in st.over));  // sent, then undone: Claude needs to hear that too
+const pendingEdits = () => Object.entries(st.over).filter(([k, v]) => JSON.stringify(st.sentSnap[k]) !== JSON.stringify(v)).length + reverted().length + st.links.filter(l => !l.sent).length;
 
 function markDirty(){
   if (!P) return;
@@ -715,6 +721,13 @@ const baseOf = path => {
   if (path.startsWith('audio.')) return P.audio[path.slice(6)];
   const [id, k] = path.split('.'), e = elById(id); return k === '@time' ? e.t : k === '@box' ? e.box : e.props[k].v;
 };
+function hasTarget(path){
+  if (path.startsWith('brand.color.')) return P.brand.colors.some(c => c.id === path.slice(12));
+  if (path.startsWith('brand.font.')) return P.brand.fonts.some(f => f.id === path.slice(11));
+  if (path === 'brand.logo' || path.startsWith('audio.')) return true;
+  const [id, k] = path.split('.'), e = elById(id);
+  return !!e && (k === '@time' || (k === '@box' ? !!e.box : k in e.props));
+}
 const sidOf = path => elById(path.split('.')[0])?.s;
 $('#pane').addEventListener('input', ev => {
   const t = ev.target, d = t.dataset;
@@ -780,24 +793,28 @@ function focusNote(id){ const n = st.notes.find(n => n.id === id); ui.selNote = 
   document.querySelector(`.note[data-id="${id}"]`)?.scrollIntoView({block:'nearest', behavior:'smooth'}); }
 
 /* ================= send to Claude: one prompt to copy and paste ================= */
-function describe(path, v){
-  const show = x => Array.isArray(x) ? x.map(r => Object.values(r).join(' | ')).join(' / ') : typeof x === 'string' && x.includes('/') ? assetName(x) : JSON.stringify(x);
+function describe(path, v, from = baseOf(path)){
+  // Lists go out as JSON so Claude sees column names; only real asset ids are swapped for file names (not any text with a "/").
+  const show = x => typeof x === 'string' && (x === 'brand.logo' || P.assets.some(a => a.id === x)) ? assetName(x) : JSON.stringify(x);
   const nice = path.startsWith('brand.color.') ? `Style · ${P.brand.colors.find(c => c.id === path.slice(12)).name} color (used everywhere)` : path.startsWith('brand.font.') ? `Style · ${P.brand.fonts.find(f => f.id === path.slice(11)).name} font` : path === 'brand.logo' ? 'Style · Logo' : path === 'audio.music' ? 'Audio · Music track' : path === 'audio.musicVol' ? 'Audio · Music volume' : path === 'audio.sfxVol' ? 'Audio · Effects volume' : null;
-  if (nice) return `- ${nice}: ${show(baseOf(path))} -> ${show(v)}`;
+  if (nice) return `- ${nice}: ${show(from)} -> ${show(v)}`;
   const [id, k] = path.split('.'), e = elById(id);
-  if (k === '@box') return `- [${fmt(elTime(e)[0])} · ${e.s} · ${e.label}] size and position, [x, y, w, h] in % of frame${e.src ? ` (${e.src})` : ''}: ${JSON.stringify(e.box)} -> ${JSON.stringify(v)} (scale ${Math.round(v[2] / e.box[2] * 100)}%)`;
-  return `- [${fmt(elTime(e)[0])} · ${e.s} · ${e.label}] ${k === '@time' ? 'timing (s)' : e.props[k].label}${e.src ? ` (${e.src})` : ''}: ${show(baseOf(path))} -> ${show(v)}`;
+  if (k === '@box') return `- [${fmt(elTime(e)[0])} · ${e.s} · ${e.label}] size and position, [x, y, w, h] in % of frame${e.src ? ` (${e.src})` : ''}: ${JSON.stringify(from)} -> ${JSON.stringify(v)} (scale ${Math.round(v[2] / e.box[2] * 100)}%)`;
+  return `- [${fmt(elTime(e)[0])} · ${e.s} · ${e.label}] ${k === '@time' ? 'timing (s)' : e.props[k].label}${e.src ? ` (${e.src})` : ''}: ${show(from)} -> ${show(v)}`;
 }
 function prompt(){
   const ver = P.version || 1, fresh = ([k, v]) => JSON.stringify(st.sentSnap[k]) !== JSON.stringify(v);
   const L = [`Motion OS feedback for "${P.title}" v${ver}`, `Project: ${P.path || P.id} · ${P.w}x${P.h} · ${P.fps} fps · ${P.duration.toFixed(1)}s`, ''];
-  const edits = Object.entries(st.over).filter(fresh).filter(([k]) => !k.endsWith('.motion'));
-  const motion = Object.entries(st.over).filter(fresh).filter(([k]) => k.endsWith('.motion'));
-  if (edits.length) { L.push('## Edits (apply exactly)'); edits.forEach(([k, v]) => L.push(describe(k, v))); L.push(''); }
+  const undo = reverted(), all = [...Object.entries(st.over).filter(fresh), ...undo.map(k => [k, baseOf(k)])];
+  const edits = all.filter(([k]) => !k.endsWith('.motion')), motion = all.filter(([k]) => k.endsWith('.motion'));
+  // "from" is what Claude last heard: the sent value if this path went out already, else the reel.json value.
+  const line = (k, v) => describe(k, v, k in st.sentSnap ? st.sentSnap[k] : baseOf(k)) + (undo.includes(k) ? ' (undo my earlier edit)' : '');
+  if (edits.length) { L.push('## Edits (apply exactly)'); edits.forEach(([k, v]) => L.push(line(k, v))); L.push(''); }
   const notes = openNotes();
   if (notes.length || motion.length) { L.push('## Notes (what I want changed)');
-    notes.forEach((n, i) => { const e = n.el && elById(n.el), s = sceneAt(n.t); L.push(`${i + 1}. [${fmt(n.t)} · ${s.id} ${s.name} · x ${n.x}% y ${n.y}%${e ? ` · on "${e.label}"${e.src ? ' (' + e.src + ')' : ''}` : ''}] ${n.text}`); });
-    motion.forEach(([k, v], i) => { const e = elById(k.split('.')[0]); L.push(`${notes.length + i + 1}. [${fmt(elTime(e)[0])} · ${e.s} · ${e.label} motion] ${v}`); }); L.push(''); }
+    // Numbered like the pins on the frame, so "note 3" means the same thing to the user and to Claude.
+    notes.forEach(n => { const e = n.el && elById(n.el), s = sceneAt(n.t); L.push(`${st.notes.indexOf(n) + 1}. [${fmt(n.t)} · ${s.id} ${s.name} · x ${n.x}% y ${n.y}%${e ? ` · on "${e.label}"${e.src ? ' (' + e.src + ')' : ''}` : ''}] ${n.text}`); });
+    motion.forEach(([k, v], i) => { const e = elById(k.split('.')[0]); L.push(`${st.notes.length + i + 1}. [${fmt(elTime(e)[0])} · ${e.s} · ${e.label} motion] ${v}`); }); L.push(''); }
   const links = st.links.filter(l => !l.sent);
   if (links.length) { L.push('## Links to download into assets/'); links.forEach(l => L.push('- ' + l.url)); L.push(''); }
   L.push('## Scenes', P.scenes.map(s => `${s.id} ${s.name} (${fmt(s.t[0])}-${fmt(s.t[1])}): ${st.status[s.id] === 'approved' ? 'approved, do not touch' : st.status[s.id] === 'changes' ? 'needs changes' : 'in review'}`).join('\n'), '');
@@ -811,10 +828,11 @@ $('#sendBtn').onclick = () => {
   const text = prompt();
   const d = sheet(`<h3>Send to Claude</h3><p>Copy this, then paste it into Claude.</p><textarea class="out" readonly></textarea><div class="row"><button class="btn ghost" data-close>Close</button><button class="btn primary" id="doCopy">Copy prompt</button></div>`);
   d.querySelector('textarea').value = text;
-  const sent = () => { st.sent = [...new Set([...st.sent, ...openNotes().map(n => n.id)])]; st.sentSnap = JSON.parse(JSON.stringify(st.over)); st.links.forEach(l => l.sent = true); renderAll(); };
+  const sent = () => { st.sent = [...new Set([...st.sent, ...openNotes().map(n => n.id)])]; st.sentSnap = JSON.parse(JSON.stringify(st.over)); st.sentBase = Object.fromEntries(Object.keys(st.over).map(k => [k, baseOf(k)])); st.links.forEach(l => l.sent = true); renderAll(); };
   d.querySelector('#doCopy').onclick = async () => {
     try { await navigator.clipboard.writeText(text); sent(); d.remove(); toast('Copied. Paste it into Claude.'); }
-    catch (e) { const ta = d.querySelector('textarea'); ta.focus(); ta.select(); sent(); toast('Selected. Press Cmd+C, then paste it into Claude.'); }
+    catch (e) { const ta = d.querySelector('textarea'); ta.focus(); ta.select(); toast('Selected. Press Cmd+C, then paste it into Claude.');
+      ta.addEventListener('copy', () => { sent(); d.remove(); toast('Copied. Paste it into Claude.'); }, {once:true}); }  // only counts as sent once copied
   };
 };
 
