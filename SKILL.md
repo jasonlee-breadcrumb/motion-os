@@ -94,7 +94,7 @@ Run this in the background (it keeps serving while you work):
 node "$SKILL_DIR/player/serve.mjs" "<project>"
 ```
 
-It prints the URL (port 4321, or the next free one) and opens the browser. If a server for this project is already running, keep it; it serves new files live.
+It prints the URL (port 4321, or the next free one) and opens the browser. If a server for this project is already running, keep it; it serves new files live. Running the command again for the same project reuses that server instead of starting a second one.
 
 Then tell the user, in two or three lines: Preview plays it; Edit (E) pauses so they can click anything, drag to move, drag a corner to resize, press N to pin a note, the Script tab has every word, and when they're done, click **Send to Claude**, copy the prompt and paste it here.
 

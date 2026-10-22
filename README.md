@@ -92,7 +92,7 @@ The music was removed from the example because the track is licensed. Voice and 
 node ~/.claude/skills/motion-os/player/serve.mjs path/to/your-project
 ```
 
-The folder needs a `reel.json` and the video it points to. Add `--port 5000` to pick a port, or `--no-open` to skip opening the browser.
+The folder needs a `reel.json` and the video it points to. Add `--port 5000` to pick a port, or `--no-open` to skip opening the browser. If that project is already open, running the command again reuses the running server, so your saved edits stay put.
 
 ## reel.json
 

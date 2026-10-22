@@ -1,5 +1,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="motionos-token" content="">
 <title>Motion OS</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -821,7 +822,9 @@ $('#sendBtn').onclick = () => {
 /* ================= export: render a new mp4 with the edits baked in (live projects) ================= */
 $('#exportBtn').onclick = async () => {
   const d = sheet(`<h3>Export MP4</h3><p id="exMsg">Starting the render…</p><div style="height:6px;border-radius:3px;background:var(--panel-2);overflow:hidden"><i id="exBar" style="display:block;height:100%;width:0;background:var(--accent);transition:width .3s"></i></div><p class="mono" id="exLine" style="font-size:11px"></p><div class="row"><button class="btn ghost" data-close>Close</button></div>`);
-  let j = await fetch('export', {method:'POST', body:JSON.stringify({boxes:liveBoxes()})}).then(r => r.json());
+  const token = document.querySelector('meta[name="motionos-token"]').content;
+  let j = await fetch('export', {method:'POST', headers:{'X-MotionOS-Token':token}, body:JSON.stringify({boxes:liveBoxes()})})
+    .then(r => r.ok ? r.json() : {state:'error', line:'The server refused the export. If you restarted it, reload this page and try again.'});
   while (j.state === 'running') {
     d.querySelector('#exBar').style.width = j.pct + '%'; d.querySelector('#exMsg').textContent = `Rendering… ${j.pct}%. You can keep working.`; d.querySelector('#exLine').textContent = j.line || '';
     await new Promise(r => setTimeout(r, 1000)); j = await fetch('export').then(r => r.json());
